@@ -4,19 +4,19 @@ subtitle: "[github.com/ecoquants/nps-veg](https://github.com/ecoquants/nps-veg)"
 author: "Ben Best"
 date: "`r format(Sys.time(), '%Y-%M-%d')`"
 output:
+  # html_document:
+  #   code_folding: hide
+  #   number_sections: yes
+  #   toc: yes
+  #   toc_depth: 2
+  #   toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
   ioslides_presentation:
     widescreen: true
     smaller: true
     #self_contained: false
-  pdf_document:
-    toc: yes
-    toc_depth: '2'
-  html_document:
-    code_folding: hide
-    number_sections: yes
-    toc: yes
-    toc_depth: 2
-    toc_float: yes
   word_document:
     toc: yes
     toc_depth: '2'
@@ -30,7 +30,7 @@ opts_chunk$set(echo = F, message = F)
 
 # rmarkdown::render("docs/index.Rmd", "all")
 # uncomment for html_document
-opts_chunk$set(echo = T)
+#opts_chunk$set(echo = T)
 
 # TODO:
 # - Parameterized Reports for `Year`,`Park`: https://rmarkdown.rstudio.com/developer_parameterized_reports.html
@@ -271,11 +271,11 @@ Working with databases & Shiny:
 
 From the same Rmarkdown document:
 
-- [index.Rmd]()
+- [index.Rmd](https://github.com/ecoquants/nps-veg/blob/master/docs/index.Rmd)
 
 You can generate these (and more):
 
-- [ioslides_presentation]()
-- [html_document]()
-- [pdf_document]()
-- [word_document]()
+- [ioslides_presentation](https://ecoquants.github.io/nps-veg)
+- [html_document](http://ecoquants.github.io/nps-veg/index_htmldoc.html)
+- [pdf_document](https://github.com/ecoquants/nps-veg/raw/master/docs/index.pdf)
+- [word_document](https://github.com/ecoquants/nps-veg/raw/master/docs/index.docx)
