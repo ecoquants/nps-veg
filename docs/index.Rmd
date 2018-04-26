@@ -2,24 +2,24 @@
 title: "Interactive Reporting Examples for NPS Terrestrial Vegetation Monitoring"
 subtitle: "[github.com/ecoquants/nps-veg](https://github.com/ecoquants/nps-veg)"
 author: "Ben Best"
-date: "`r format(Sys.time(), '%Y-%M-%d')`"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
 output:
-  # html_document:
-  #   code_folding: hide
-  #   number_sections: yes
-  #   toc: yes
-  #   toc_depth: 2
-  #   toc_float: yes
   pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
     toc: yes
     toc_depth: '2'
   ioslides_presentation:
     widescreen: true
     smaller: true
     #self_contained: false
-  word_document:
-    toc: yes
-    toc_depth: '2'
+# html_document:
+#   code_folding: hide
+#   number_sections: yes
+#   toc: yes
+#   toc_depth: 2
+#   toc_float: yes    
 editor_options:
   chunk_output_type: console
 ---
