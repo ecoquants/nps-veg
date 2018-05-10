@@ -1,0 +1,131 @@
+---
+title: "queries"
+author: "Ben Best"
+date: "5/7/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Write Configuration File
+
+```{r}
+library(tidyverse)
+library(here)
+library(stringr)
+library(lubridate)
+library(fs)
+library(glue)
+library(yaml)
+
+nps_config_yaml = here("data/nps_config.yaml")
+nps_config <- list(
+  dir_accdbs = "Z:/bbest On My Mac/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase",
+  dir_tables = "/Users/bbest/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase/tables")
+
+write_yaml(nps_config, nps_config_yaml)
+nps_config <- read_yaml(nps_config_yaml)
+```
+
+## Load NPS R Library
+
+```{r, eval=F}
+library(RODBC)
+list.files(nps_config$dir_accdbs, ".*\\.accdb")
+
+if (R.version$arch == "x86_64") stop("Need to switch from 64-bit R to 32-bit.")
+
+db <- file.path(nps_config$dir_accdbs, "LandVegetationMonitoring_DATA_be.accdb")
+file.exists(db)
+con <- RODBC::odbcConnectAccess(db) 
+# ERROR: state HY000, code -1028, message [Microsoft][ODBC Microsoft Access Driver] Cannot open database '(unknown)'.  It may not be a database that your application recognizes, or the file may be corrupt.[RODBC] ERROR: state 01000, code 1, message [Microsoft][ODBC Microsoft Access Driver]General Warning Unable to open registry key 'Temporary (volatile) Jet DSN for process 0x7cc Thread 0x1b9c DBC 0x9738c64 Jet'.
+```
+
+```{r}
+
+#devtools::install("~/github/npstools")
+#library(npstools)
+devtools::load_all("~/github/npstools")
+?read_park_tables
+
+# limit by park and year
+year <- 2015
+park <- "CABR"
+# TODO: tbl_Sites.Site_Name = SAMO|CABR|CHIS Island
+
+read_park_tables(nps_config, park)
+
+tlu_Richness <- read_csv(file.path(nps_config$dir_tables, "shared", "tlu_Richness.csv"))
+
+#df_plots_spp <- get_spp_richness_plots()
+
+
+d <- tbl_Phenology_Species %>%
+  # convert to 5 m plot values
+  select(Event_ID, Species_Code, starts_with("Plot")) %>%
+  gather(plot_col, plot_val, -Event_ID, -Species_Code) %>%
+  filter(plot_col != "Plot_7") %>%
+  left_join(
+    tlu_Richness,
+    by = c("plot_val"="Richness_code")) %>%
+  mutate(
+    plot_num    = str_sub(plot_col, 6,6),
+    plot_length = ifelse(nchar(plot_col) == 6, "5m", "1m")) %>%
+  group_by(Event_ID, Species_Code, plot_num) %>%
+  summarize(
+    present = max(Analysis_value)) %>%
+  # summarize by transect, ie all plots
+  group_by(Event_ID, Species_Code) %>%
+  summarize(
+    present = max(present)) %>%
+  # filter by year
+  left_join(
+    tbl_Events %>%
+      mutate(
+        date = as.Date(Start_Date, "%m/%d/%Y %H:%M:%S")), 
+    by="Event_ID") %>%
+  filter(
+    year(date) == year)
+
+# summarize by all species
+d %>%
+  filter(present == 1) %>%
+  group_by(Event_ID) %>%
+  summarize(
+    spp_richness = n_distinct(Species_Code)) %>%
+  ungroup() %>%
+  summarize(
+    spp_richness_mean = mean(spp_richness),
+    spp_richness_sd   = sd(spp_richness),
+    spp_richness_min  = min(spp_richness),
+    spp_richness_max  = max(spp_richness))
+# summarize by native/non-native
+# summarize above by Vegetation_Communities
+# summarize above by Life forms (shrub, grass, ...)
+
+.Species_Code -> tbl_Project_Taxa.Layer -> tlu_Layer.Layer_desc:
+
+Layer_desc
+Unknown
+Crust
+Fern
+Grass
+Herbaceous
+Litter
+Mineral
+Non-Vascular
+Shrub
+Tree
+Sub-shrub
+Vine
+# * issue with too few species in these groupings so prob need to lump
+
+
+  gather()
+# plots: 1 (0-5m), 11 (0-1m), 2 (5-10m), 21 (5-6m)
+
+```
+
+TODO: on exit for accessdb, export csv files based on date modified
