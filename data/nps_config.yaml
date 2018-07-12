@@ -1,2 +1,3 @@
-dir_accdbs: Z:/bbest On My Mac/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase
-dir_tables: /Users/bbest/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase/tables
+dir_tables_csv:
+  default: ~/Google Drive/projects/nps-ecoquants/data/tables_csv
+  Ben-Bests-Macbook-Pro.local: ~/Google Drive/projects/nps-ecoquants/data/tables_csv

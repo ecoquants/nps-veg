@@ -3,6 +3,8 @@ title: "queries"
 author: "Ben Best"
 date: "5/7/2018"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -19,11 +21,14 @@ library(lubridate)
 library(fs)
 library(glue)
 library(yaml)
+here = here::here
 
 nps_config_yaml = here("data/nps_config.yaml")
 nps_config <- list(
-  dir_accdbs = "Z:/bbest On My Mac/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase",
-  dir_tables = "/Users/bbest/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase/tables")
+  #dir_accdbs = "Z:/bbest On My Mac/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase",
+  dir_tables_csv = list(
+    "default" =  "~/Google Drive/projects/nps-ecoquants/data/tables_csv",
+    "Ben-Bests-Macbook-Pro.local" = "~/Google Drive/projects/nps-ecoquants/data/tables_csv"))
 
 write_yaml(nps_config, nps_config_yaml)
 nps_config <- read_yaml(nps_config_yaml)
@@ -48,19 +53,21 @@ con <- RODBC::odbcConnectAccess(db)
 #devtools::install("~/github/npstools")
 #library(npstools)
 devtools::load_all("~/github/npstools")
-?read_park_tables
+#?read_park_tables
 
 # limit by park and year
 year <- 2015
 park <- "CABR"
 # TODO: tbl_Sites.Site_Name = SAMO|CABR|CHIS Island
 
-read_park_tables(nps_config, park)
+#read_park_tables(nps_config, park)
+load_park_tables(
+  nps_config, park, 
+  tbls=c("tbl_Phenology_Species", "tlu_Richness", "tbl_Events", "tbl_Locations", "tlu_Project_Taxa", "tlu_Layer"))
 
-tlu_Richness <- read_csv(file.path(nps_config$dir_tables, "shared", "tlu_Richness.csv"))
+#tlu_Richness <- read_csv(file.path(nps_config$dir_tables, "shared", "tlu_Richness.csv"))
 
 #df_plots_spp <- get_spp_richness_plots()
-
 
 d <- tbl_Phenology_Species %>%
   # convert to 5 m plot values
@@ -87,25 +94,163 @@ d <- tbl_Phenology_Species %>%
         date = as.Date(Start_Date, "%m/%d/%Y %H:%M:%S")), 
     by="Event_ID") %>%
   filter(
-    year(date) == year)
+    year(date) == year) %>%
+  # get species nativity, life form, by park
+  left_join(
+    tlu_Project_Taxa %>%
+      select(Species_Code=Species_code, Native, Layer) %>%
+      left_join(
+        tlu_Layer %>%
+          select(Layer=Layer_code, Life_Form=Layer_desc),
+        by="Layer"),
+    by="Species_Code") %>%
+  # get vegetation community
+  left_join(
+    tbl_Locations %>%
+      select(Location_ID, Vegetation_Community),
+    by="Location_ID") %>%
+  ungroup() %>%
+  select(Event_ID, Species_Code, Native, Life_Form, Vegetation_Community)
 
-# summarize by all species
-d %>%
-  filter(present == 1) %>%
+calc_spp_R <- function(tbl, v_life_form="All", v_nativity="All", v_community="All"){
+  tbl %>%
+    summarize(
+      spp_R = n_distinct(.data$Species_Code)) %>%
+    ungroup() %>%
+    summarize(
+      spp_R_mean = mean(spp_R),
+      spp_R_sd   = sd(spp_R),
+      spp_R_min  = min(spp_R),
+      spp_R_max  = max(spp_R)) %>%
+    mutate(
+      life_form = v_life_form,
+      nativity  = v_nativity,
+      community = v_community)
+}
+
+# custom calculation function
+calc_spp_mean <- function(pivotCalculator, netFilters, format, baseValues, cell) {
+  d <- pivotCalculator$getDataFrame("d")
+  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
+  v <- d_f %>%
+    group_by(Event_ID) %>%
+    summarise(n_spp = n_distinct(Species_Code)) %>%
+    ungroup() %>%
+    summarize(
+      v = mean(n_spp)) %>%
+    pull(v)
+  #v <- ifelse(is.nan(v), 0, v)
+  #browser()
+  list(
+    rawValue = v, 
+    formattedValue = ifelse(is.nan(v), "", pivotCalculator$formatValue(v, format=format)))
+}
+
+calc_spp_sd <- function(pivotCalculator, netFilters, format, baseValues, cell) {
+  d <- pivotCalculator$getDataFrame("d")
+  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
+  v <- d_f %>%
+    group_by(Event_ID) %>%
+    summarise(n_spp = n_distinct(Species_Code)) %>%
+    ungroup() %>%
+    summarize(
+      v = sd(n_spp)) %>%
+    pull(v)
+  list(
+    rawValue = v, 
+    formattedValue = ifelse(is.nan(v), "", pivotCalculator$formatValue(v, format=format)))
+}
+
+calc_spp_min <- function(pivotCalculator, netFilters, format, baseValues, cell) {
+  d <- pivotCalculator$getDataFrame("d")
+  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
+  v <- d_f %>%
+    group_by(Event_ID) %>%
+    summarise(n_spp = n_distinct(Species_Code)) %>%
+    ungroup() %>%
+    summarize(
+      v = min(n_spp)) %>%
+    pull(v)
+  list(
+    rawValue = v, 
+    formattedValue = ifelse(is.nan(v) | is.infinite(v), "", pivotCalculator$formatValue(v, format=format)))
+}
+
+calc_spp_max <- function(pivotCalculator, netFilters, format, baseValues, cell) {
+  d <- pivotCalculator$getDataFrame("d")
+  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
+  v <- d_f %>%
+    group_by(Event_ID) %>%
+    summarise(n_spp = n_distinct(Species_Code)) %>%
+    ungroup() %>%
+    summarize(
+      v = max(n_spp)) %>%
+    pull(v)
+  list(
+    rawValue = v, 
+    formattedValue = ifelse(is.nan(v) | is.infinite(v), "", pivotCalculator$formatValue(v, format=format)))
+}
+
+# create the pivot table
+pt <- PivotTable$new()
+pt$addData(d, "d")
+pt$addRowDataGroups("Life_Form", totalCaption="All")
+pt$addRowDataGroups("Native", totalCaption="All")
+pt$addColumnDataGroups("Vegetation_Community", totalCaption="All")
+pt$defineCalculation(
+  calculationName="mean_n_spp", caption="mean", calculationFunction=calc_spp_mean,
+  format="%.1f", noDataCaption="", type="function") # noDataValue=0, 
+pt$defineCalculation(
+  calculationName="mean_sd_spp", caption="sd", calculationFunction=calc_spp_sd,
+  format="%.1f", type="function")
+pt$defineCalculation(
+  calculationName="mean_sd_min", caption="min", calculationFunction=calc_spp_min,
+  format="%.1f", type="function")
+pt$defineCalculation(
+  calculationName="mean_sd_max", caption="max", calculationFunction=calc_spp_max,
+  format="%.1f", type="function")
+pt$renderPivot()
+
+#d %>%
+  
+library(pivottabler)
+
+qhpvt(d, rows = c("Life_Form","Native"), columns = c("Vegetation_Community"), calculations = c("mean" = "group_by(Event_ID) %>% n_distinct(Species_Code)"))
+
+
+View(bhmtrains)
+qhpvt(bhmtrains, rows=c("TOC"), "TrainCategory", "n()")
+qhpvt(d, )
+
+# summarize species richness by All life_form, All nativity, All community
+d_all <- d %>%
   group_by(Event_ID) %>%
+  calc_spp_R(v_life_form="All", v_nativity="All", v_community="All")
+# summarize species richness by life_form, All nativity, All community
+d_life_form <- d %>%
+  group_by(Event_ID) %>%
+  calc_spp_R(v_life_form="All", v_nativity="All", v_community="All")
+
+
+
+
+
   summarize(
-    spp_richness = n_distinct(Species_Code)) %>%
+    spp_R = n_distinct(Species_Code)) %>%
   ungroup() %>%
   summarize(
-    spp_richness_mean = mean(spp_richness),
-    spp_richness_sd   = sd(spp_richness),
-    spp_richness_min  = min(spp_richness),
-    spp_richness_max  = max(spp_richness))
+    spp_R_mean = mean(spp_R),
+    spp_R_sd   = sd(spp_R),
+    spp_R_min  = min(spp_R),
+    spp_R_max  = max(spp_R))
+
+d_nativity <- 
+
+d
 # summarize by native/non-native
 # summarize above by Vegetation_Communities
-# summarize above by Life forms (shrub, grass, ...)
-
-.Species_Code -> tbl_Project_Taxa.Layer -> tlu_Layer.Layer_desc:
+# TODO: summarize above by Life forms (shrub, grass, ...)
+#       .Species_Code -> tlu_Project_Taxa.Layer -> tlu_Layer.Layer_desc:
 
 Layer_desc
 Unknown

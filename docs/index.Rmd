@@ -81,7 +81,7 @@ library(mapview)
 library(glue)
 library(sf)
 
-dir_tbl <- "~/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase/tables"
+dir_tbl <- "~/Google Drive/projects/nps-ecoquants/data/tables_csv"
 
 to_lonlat <- function(x, y, crs_str){
   st_as_sf(data_frame(x=x, y=y), crs=crs_str, coords = c("x", "y")) %>%
