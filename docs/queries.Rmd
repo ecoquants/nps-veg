@@ -14,23 +14,26 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Write Configuration File
 
 ```{r}
-library(tidyverse)
-library(here)
-library(stringr)
-library(lubridate)
-library(fs)
-library(glue)
-library(yaml)
-here = here::here
+# library(tidyverse)
+# library(here)
+# library(stringr)
+# library(lubridate)
+# library(fs)
+# library(glue)
+# library(yaml)
+# here = here::here
+#devtools::install("~/github/npstools")
+#library(npstools)
+devtools::load_all("~/github/npstools")
 
 nps_config_yaml = here("data/nps_config.yaml")
-nps_config <- list(
-  #dir_accdbs = "Z:/bbest On My Mac/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase",
-  dir_tables_csv = list(
-    "default" =  "~/Google Drive/projects/nps-ecoquants/data/tables_csv",
-    "Ben-Bests-Macbook-Pro.local" = "~/Google Drive/projects/nps-ecoquants/data/tables_csv"))
-
-write_yaml(nps_config, nps_config_yaml)
+# nps_config <- list(
+#   #dir_accdbs = "Z:/bbest On My Mac/Google Drive/projects/nps-ecoquants/data/CHISLandVegetationMonitoringDatabase",
+#   dir_tables_csv = list(
+#     "default" =  "~/Google Drive/projects/nps-ecoquants/data/tables_csv",
+#     "Ben-Bests-Macbook-Pro.local" = "~/Google Drive/projects/nps-ecoquants/data/tables_csv"))
+# 
+# write_yaml(nps_config, nps_config_yaml)
 nps_config <- read_yaml(nps_config_yaml)
 ```
 
@@ -48,229 +51,335 @@ con <- RODBC::odbcConnectAccess(db)
 # ERROR: state HY000, code -1028, message [Microsoft][ODBC Microsoft Access Driver] Cannot open database '(unknown)'.  It may not be a database that your application recognizes, or the file may be corrupt.[RODBC] ERROR: state 01000, code 1, message [Microsoft][ODBC Microsoft Access Driver]General Warning Unable to open registry key 'Temporary (volatile) Jet DSN for process 0x7cc Thread 0x1b9c DBC 0x9738c64 Jet'.
 ```
 
-```{r}
 
-#devtools::install("~/github/npstools")
-#library(npstools)
+https://cran.r-project.org/web/packages/pivottabler/index.html
+
+```{r}
+library(tidyverse)
+library(here)
+library(glue)
 devtools::load_all("~/github/npstools")
-#?read_park_tables
+nps_config <- get_nps_config(here("data/nps_config.yaml"))
 
 # limit by park and year
 year <- 2015
-park <- "CABR"
-# TODO: tbl_Sites.Site_Name = SAMO|CABR|CHIS Island
+park <- "CABR" # TODO: tbl_Sites.Site_Name = SAMO|CABR|CHIS Island
+n_spp_xlsx <- here(glue("data/spp_richness_pivot_{park}_{year}.xlsx"))
 
-#read_park_tables(nps_config, park)
+# Table E.6 ----
+# devtools::document("~/github/npstools"); devtools::load_all("~/github/npstools")
+#n_spp_tbl <- get_n_spp_pt_tbl(park, year, xlsx=n_spp_xlsx)
+#n_spp_tbl$renderPivot()
+
+# n_spp_tbl$asDataFrame(separator = " | ")
+# n_spp_tbl <- pt$asTidyDataFrame() %>% as_tibble()
+# n_spp_tbl
+
+# Figure E2 ----
+devtools::document("~/github/npstools"); devtools::load_all("~/github/npstools")
+
+# VBA: mod_ExportQueries.Export_AnnualReport_AbsoluteCover()
+
+tbl_spp_park <- get_spp_park_tbl(park) # TODO: CINMS - tbl_Events, tlu_Project_Taxa not found
+
 load_park_tables(
-  nps_config, park, 
-  tbls=c("tbl_Phenology_Species", "tlu_Richness", "tbl_Events", "tbl_Locations", "tlu_Project_Taxa", "tlu_Layer"))
+  nps_config, park,
+  tbls=c(
+    # inner joins
+    "tbl_Sites", "tbl_Locations", "tbl_Events", "tbl_Event_Point", 
+    # left joins
+    "tbl_Species_Data", "tlu_Condition"))
 
-#tlu_Richness <- read_csv(file.path(nps_config$dir_tables, "shared", "tlu_Richness.csv"))
-
-#df_plots_spp <- get_spp_richness_plots()
-
-d <- tbl_Phenology_Species %>%
-  # convert to 5 m plot values
-  select(Event_ID, Species_Code, starts_with("Plot")) %>%
-  gather(plot_col, plot_val, -Event_ID, -Species_Code) %>%
-  filter(plot_col != "Plot_7") %>%
+# VBA: ...strRaw = 
+d <- tbl_Sites %>%
+  inner_join(
+    tbl_Locations %>% select(-Unit_Code), by="Site_ID") %>%
+  inner_join(
+    tbl_Events %>% select(-Analysis_code), by="Location_ID") %>%
+  inner_join(
+    tbl_Event_Point, by="Event_ID") %>%
   left_join(
-    tlu_Richness,
-    by = c("plot_val"="Richness_code")) %>%
-  mutate(
-    plot_num    = str_sub(plot_col, 6,6),
-    plot_length = ifelse(nchar(plot_col) == 6, "5m", "1m")) %>%
-  group_by(Event_ID, Species_Code, plot_num) %>%
-  summarize(
-    present = max(Analysis_value)) %>%
-  # summarize by transect, ie all plots
-  group_by(Event_ID, Species_Code) %>%
-  summarize(
-    present = max(present)) %>%
-  # filter by year
+    tbl_Species_Data, by="Event_Point_ID") %>%
   left_join(
-    tbl_Events %>%
-      mutate(
-        date = as.Date(Start_Date, "%m/%d/%Y %H:%M:%S")), 
-    by="Event_ID") %>%
+    tlu_Condition, by="Condition") %>%
+  left_join(
+    tbl_spp_park, by=c("Species_Code")) %>% # TODO: consider to_lower() or fix column names
+  # VBA: ...LocTypeFilter()
   filter(
-    year(date) == year) %>%
-  # get species nativity, life form, by park
-  left_join(
-    tlu_Project_Taxa %>%
-      select(Species_Code=Species_code, Native, Layer) %>%
-      left_join(
-        tlu_Layer %>%
-          select(Layer=Layer_code, Life_Form=Layer_desc),
-        by="Layer"),
-    by="Species_Code") %>%
-  # get vegetation community
-  left_join(
-    tbl_Locations %>%
-      select(Location_ID, Vegetation_Community),
-    by="Location_ID") %>%
-  ungroup() %>%
-  select(Event_ID, Species_Code, Native, Life_Form, Vegetation_Community)
+    Unit_Code == park,
+    Loc_Type == "I&M",
+    Monitoring_Status == "Active") %>%
+  # VBA: ...strWhere = 
+  mutate(
+    start_date = lubridate::as_date(
+      Start_Date, tz="America/Los_Angeles", format = "%d/%m/%Y %H:%M:%S"),
+    SurveyYear = lubridate::year(start_date)) %>%
+  filter(
+    lubridate::year(start_date) == year,
+    is.null(Analysis_code) || Analysis_code == "Alive") %>%
+  select(
+    SurveyYear, Park = Unit_Code, IslandCode = Site_Name, SiteCode = Location_Code, Vegetation_Community,
+    Species_Code, Condition = Analysis_code, FxnGroup, Nativity)
 
-calc_spp_R <- function(tbl, v_life_form="All", v_nativity="All", v_community="All"){
-  tbl %>%
-    summarize(
-      spp_R = n_distinct(.data$Species_Code)) %>%
-    ungroup() %>%
-    summarize(
-      spp_R_mean = mean(spp_R),
-      spp_R_sd   = sd(spp_R),
-      spp_R_min  = min(spp_R),
-      spp_R_max  = max(spp_R)) %>%
-    mutate(
-      life_form = v_life_form,
-      nativity  = v_nativity,
-      community = v_community)
-}
-
-# custom calculation function
-calc_spp_mean <- function(pivotCalculator, netFilters, format, baseValues, cell) {
-  d <- pivotCalculator$getDataFrame("d")
-  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
-  v <- d_f %>%
-    group_by(Event_ID) %>%
-    summarise(n_spp = n_distinct(Species_Code)) %>%
-    ungroup() %>%
-    summarize(
-      v = mean(n_spp)) %>%
-    pull(v)
-  #v <- ifelse(is.nan(v), 0, v)
-  #browser()
-  list(
-    rawValue = v, 
-    formattedValue = ifelse(is.nan(v), "", pivotCalculator$formatValue(v, format=format)))
-}
-
-calc_spp_sd <- function(pivotCalculator, netFilters, format, baseValues, cell) {
-  d <- pivotCalculator$getDataFrame("d")
-  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
-  v <- d_f %>%
-    group_by(Event_ID) %>%
-    summarise(n_spp = n_distinct(Species_Code)) %>%
-    ungroup() %>%
-    summarize(
-      v = sd(n_spp)) %>%
-    pull(v)
-  list(
-    rawValue = v, 
-    formattedValue = ifelse(is.nan(v), "", pivotCalculator$formatValue(v, format=format)))
-}
-
-calc_spp_min <- function(pivotCalculator, netFilters, format, baseValues, cell) {
-  d <- pivotCalculator$getDataFrame("d")
-  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
-  v <- d_f %>%
-    group_by(Event_ID) %>%
-    summarise(n_spp = n_distinct(Species_Code)) %>%
-    ungroup() %>%
-    summarize(
-      v = min(n_spp)) %>%
-    pull(v)
-  list(
-    rawValue = v, 
-    formattedValue = ifelse(is.nan(v) | is.infinite(v), "", pivotCalculator$formatValue(v, format=format)))
-}
-
-calc_spp_max <- function(pivotCalculator, netFilters, format, baseValues, cell) {
-  d <- pivotCalculator$getDataFrame("d")
-  d_f <- pivotCalculator$getFilteredDataFrame(d, netFilters)
-  v <- d_f %>%
-    group_by(Event_ID) %>%
-    summarise(n_spp = n_distinct(Species_Code)) %>%
-    ungroup() %>%
-    summarize(
-      v = max(n_spp)) %>%
-    pull(v)
-  list(
-    rawValue = v, 
-    formattedValue = ifelse(is.nan(v) | is.infinite(v), "", pivotCalculator$formatValue(v, format=format)))
-}
-
-# create the pivot table
-pt <- PivotTable$new()
-pt$addData(d, "d")
-pt$addRowDataGroups("Life_Form", totalCaption="All")
-pt$addRowDataGroups("Native", totalCaption="All")
-pt$addColumnDataGroups("Vegetation_Community", totalCaption="All")
-pt$defineCalculation(
-  calculationName="mean_n_spp", caption="mean", calculationFunction=calc_spp_mean,
-  format="%.1f", noDataCaption="", type="function") # noDataValue=0, 
-pt$defineCalculation(
-  calculationName="mean_sd_spp", caption="sd", calculationFunction=calc_spp_sd,
-  format="%.1f", type="function")
-pt$defineCalculation(
-  calculationName="mean_sd_min", caption="min", calculationFunction=calc_spp_min,
-  format="%.1f", type="function")
-pt$defineCalculation(
-  calculationName="mean_sd_max", caption="max", calculationFunction=calc_spp_max,
-  format="%.1f", type="function")
-pt$renderPivot()
-
-#d %>%
-  
-library(pivottabler)
-
-qhpvt(d, rows = c("Life_Form","Native"), columns = c("Vegetation_Community"), calculations = c("mean" = "group_by(Event_ID) %>% n_distinct(Species_Code)"))
-
-
-View(bhmtrains)
-qhpvt(bhmtrains, rows=c("TOC"), "TrainCategory", "n()")
-qhpvt(d, )
-
-# summarize species richness by All life_form, All nativity, All community
-d_all <- d %>%
-  group_by(Event_ID) %>%
-  calc_spp_R(v_life_form="All", v_nativity="All", v_community="All")
-# summarize species richness by life_form, All nativity, All community
-d_life_form <- d %>%
-  group_by(Event_ID) %>%
-  calc_spp_R(v_life_form="All", v_nativity="All", v_community="All")
-
-
-
-
-
+# VBA: ...strRawSum =
+d_sum <- d %>%
+  group_by(SurveyYear, Park, IslandCode, SiteCode, Vegetation_Community, FxnGroup, Nativity) %>%
   summarize(
-    spp_R = n_distinct(Species_Code)) %>%
-  ungroup() %>%
-  summarize(
-    spp_R_mean = mean(spp_R),
-    spp_R_sd   = sd(spp_R),
-    spp_R_min  = min(spp_R),
-    spp_R_max  = max(spp_R))
+    N = n_distinct(Species_Code)) # TODO: confirm same as SQL: Count(qRaw.Species_Code) AS N
 
-d_nativity <- 
+# VBA: ...str1 = 
+q1 <- tbl_Sites %>%
+  inner_join(
+    tbl_Locations %>% select(-Unit_Code), by="Site_ID") %>%
+  inner_join(
+    tbl_Events %>% select(-Analysis_code), by="Location_ID")  %>%
+  # VBA: ...LocTypeFilter()
+  filter(
+    Unit_Code == park,
+    Loc_Type == "I&M",
+    Monitoring_Status == "Active") %>%
+  # VBA: year
+  mutate(
+    start_date = lubridate::as_date(
+      Start_Date, tz="America/Los_Angeles", format = "%d/%m/%Y %H:%M:%S"),
+    SurveyYear = lubridate::year(start_date)) %>%
+  filter(
+   SurveyYear == year) %>%
+  # select
+  select(SurveyYear, Park=Unit_Code, IslandCode=Site_Name, SiteCode=Location_Code, Vegetation_Community)
 
-d
-# summarize by native/non-native
-# summarize above by Vegetation_Communities
-# TODO: summarize above by Life forms (shrub, grass, ...)
-#       .Species_Code -> tlu_Project_Taxa.Layer -> tlu_Layer.Layer_desc:
+# VBA: ...str1 = 
+q2 <- tbl_Sites %>%
+  inner_join(
+    tbl_Locations %>% select(-Unit_Code), by="Site_ID") %>%
+  inner_join(
+    tbl_Events %>% select(-Analysis_code), by="Location_ID") %>%
+  inner_join(
+    tbl_Event_Point, by="Event_ID") %>%
+  left_join(
+    tbl_Species_Data, by="Event_Point_ID") %>%
+  left_join(
+    tlu_Condition, by="Condition") %>%
+  left_join(
+    tbl_spp_park, by=c("Species_Code")) %>%
+  # VBA: ...strWhere = 
+  mutate(
+    start_date = lubridate::as_date(
+      Start_Date, tz="America/Los_Angeles", format = "%d/%m/%Y %H:%M:%S")) %>%
+  filter(
+    lubridate::year(start_date) == year,
+    is.null(Analysis_code) || Analysis_code == "Alive")
 
-Layer_desc
-Unknown
-Crust
-Fern
-Grass
-Herbaceous
-Litter
-Mineral
-Non-Vascular
-Shrub
-Tree
-Sub-shrub
-Vine
-# * issue with too few species in these groupings so prob need to lump
+# VBA: ...str0Data = 
+q_0data <- q1 %>%
+  full_join(q2, by="Vegetation_Community") %>% # TODO: confirm CROSS JOIN by="Vegetation_Community"
+  mutate(
+    N = 0) %>%
+  select(SurveyYear, Park, IslandCode, SiteCode, Vegetation_Community, FxnGroup, Nativity, N)
+
+# VBA: ...strData = strRawSum + str0Data
+q_data <- q_0data %>%
+  bind_rows(
+    d_sum) %>%
+  group_by(SurveyYear, Park, IslandCode, SiteCode, Vegetation_Community, FxnGroup, Nativity)
+
+# VBA: ...strAbsCovData = Calculating Absolute Cover (Figure E2)
+q_abscov <- q_data %>% 
+  inner_join()
+```
+
+```sql
+--- TotalPointsSQL = Function TotalPointsSQL(iPark As Integer)
+SELECT DISTINCT tbl_Sites.Unit_Code AS Park, tbl_Sites.Site_Name AS IslandCode, tbl_Locations.Location_ID, 
+  tbl_Locations.Location_Code AS SiteCode, tbl_Locations.Vegetation_Community, Year(tbl_Events.Start_Date) AS SurveyYear,
+  tbl_Events.Start_Date AS SurveyDate, Count(tbl_Event_Point.Point_No) AS NofPoints
+FROM 
+  tbl_Sites INNER JOIN (
+    tbl_Locations INNER JOIN (
+      tbl_Events INNER JOIN 
+        tbl_Event_Point ON 
+        tbl_Events.Event_ID = tbl_Event_Point.Event_ID) ON 
+      tbl_Locations.Location_ID = tbl_Events.Location_ID) ON 
+    tbl_Sites.Site_ID = tbl_Locations.Site_ID
+WHERE (" & LocTypeFilter(iPark) & ") 
+GROUP BY tbl_Sites.Unit_Code, tbl_Sites.Site_Name, tbl_Locations.Location_ID, tbl_Locations.Location_Code,
+  tbl_Locations.Vegetation_Community, tbl_Events.Start_Date, Year(tbl_Events.Start_Date)
+HAVING tbl_Sites.Unit_Code = "ParkName(iPark)"
+
+--- strAbsCovData = Calculating Absolute Cover (Figure E2)
+SELECT qData.SurveyYear, qData.Park, qData.IslandCode, qData.SiteCode, qData.Vegetation_Community, qData.FxnGroup, 
+  qData.Nativity, qData.SumOfN, qTotalPoints.NofPoints, ([SumOfN]/[NofPoints])*100 AS AbsCover 
+FROM ("strData") AS qData INNER JOIN ("TotalPointsSQL(xPark)") AS qTotalPoints ON (qData.SurveyYear = qTotalPoints.SurveyYear) AND (qData.Park = qTotalPoints.Park) AND (qData.IslandCode = qTotalPoints.IslandCode) AND (qData.SiteCode = qTotalPoints.SiteCode)
+
+--- strData = strRawSum + str0Data
+SELECT qryUnion.SurveyYear, qryUnion.Park, qryUnion.IslandCode, qryUnion.SiteCode, qryUnion.Vegetation_Community, 
+  qryUnion.FxnGroup, qryUnion.Nativity, Sum(qryUnion.N) AS SumOfN 
+FROM (SELECT * FROM ("str0Data") AS q0Data UNION 
+  SELECT * FROM ("strRawSum") AS qryRawSum)  AS qryUnion
+  GROUP BY qryUnion.SurveyYear, qryUnion.Park, qryUnion.IslandCode, qryUnion.SiteCode, 
+  qryUnion.Vegetation_Community, qryUnion.FxnGroup, qryUnion.Nativity"
+
+--- str0Data = 
+SELECT qry1.SurveyYear, qry1.Park, qry1.IslandCode, qry1.SiteCode, qry1.Vegetation_Community, qry2.FxnGroup, qry2.Nativity, 0 AS N 
+FROM (" & str1 & ")  AS qry1, (" & str2 & ")  AS qry2
+
+--- str2 =
+SELECT DISTINCT Park_Spp.FxnGroup, Park_Spp.Nativity 
+FROM ((
+  tbl_Sites INNER JOIN (
+    tbl_Locations INNER JOIN (
+      tbl_Events INNER JOIN (
+        tbl_Event_Point LEFT JOIN 
+          tbl_Species_Data ON 
+          tbl_Event_Point.Event_Point_ID = tbl_Species_Data.Event_Point_ID) ON 
+        tbl_Events.Event_ID = tbl_Event_Point.Event_ID) ON 
+      tbl_Locations.Location_ID = tbl_Events.Location_ID) ON 
+    tbl_Sites.Site_ID = tbl_Locations.Site_ID ) LEFT JOIN 
+    tlu_Condition ON 
+    tbl_Species_Data.Condition = tlu_Condition.Condition) LEFT JOIN 
+    (" & ParkSpeciesSQL(xPark) & ") AS Park_Spp ON 
+    Park_Spp.Species_code = tbl_Species_Data.Species_Code " & _
+    "WHERE (" & strWhere & ")"
+
+--- str1 = 
+SELECT Year([Start_Date]) AS SurveyYear, tbl_Sites.Unit_Code AS Park, tbl_Sites.Site_Name AS IslandCode, tbl_Locations.Location_Code AS SiteCode, tbl_Locations.Vegetation_Community 
+FROM 
+  tbl_Sites INNER JOIN (
+    tbl_Locations INNER JOIN 
+      tbl_Events ON 
+      tbl_Locations.Location_ID = tbl_Events.Location_ID) ON 
+    tbl_Sites.Site_ID = tbl_Locations.Site_ID
+WHERE (" & LocTypeFilter(xPark) & " AND ((Year([Start_Date]))=" & xYear & "))"
+    
+
+-- strWhere = 
+LocTypeFilter(xPark) & " AND ((Year([Start_Date]))=" & xYear & ") AND ((tlu_Condition.Analysis_code) Is Null Or (tlu_Condition.Analysis_code)=" & Chr$(34) & "Alive" & Chr$(34) & ")"
+
+-- LocTypeFilter = 
+LocTypeFilter = "((tbl_Sites.Unit_Code)=" & Chr$(34) & ParkName(iPark) & Chr$(34) & ") AND ((tbl_Locations.Loc_Type)=" & Chr$(34) & "I&M" & Chr$(34) & ") " & _
+    "AND ((tbl_Locations.Monitoring_Status)=" & Chr$(34) & "Active" & Chr$(34) & ")"
+
+-- VBA: ...strRaw = 
+SELECT Year([Start_Date]) AS SurveyYear, tbl_Sites.Unit_Code AS Park, tbl_Sites.Site_Name AS
+  IslandCode, tbl_Locations.Location_Code AS SiteCode, tbl_Locations.Vegetation_Community,
+  tbl_Species_Data.Species_Code, tlu_Condition.Analysis_code AS Condition, Park_Spp.FxnGroup,
+  Park_Spp.Nativity
+FROM ((
+  tbl_Sites INNER JOIN (
+    tbl_Locations INNER JOIN (
+      tbl_Events INNER JOIN (
+        tbl_Event_Point LEFT JOIN 
+          tbl_Species_Data ON 
+          tbl_Event_Point.Event_Point_ID = tbl_Species_Data.Event_Point_ID) ON
+        tbl_Events.Event_ID = tbl_Event_Point.Event_ID) ON 
+      tbl_Locations.Location_ID = tbl_Events.Location_ID) ON 
+    tbl_Sites.Site_ID = tbl_Locations.Site_ID) LEFT JOIN
+  tlu_Condition ON 
+  tbl_Species_Data.Condition = tlu_Condition.Condition) LEFT JOIN 
+  (ParkSpeciesSQL(xPark)) AS Park_Spp ON 
+  Park_Spp.Species_code = tbl_Species_Data.Species_Code 
+  WHERE (" & strWhere & ")"
+
+--- strRawSum =
+SELECT qRaw.SurveyYear, qRaw.Park, qRaw.IslandCode, qRaw.SiteCode, qRaw.Vegetation_Community, qRaw.FxnGroup, qRaw.Nativity, Count(qRaw.Species_Code) AS N
+FROM [strRaw] AS qRaw GROUP BY qRaw.SurveyYear, qRaw.Park, qRaw.IslandCode, qRaw.SiteCode,
+  qRaw.Vegetation_Community, qRaw.FxnGroup, qRaw.Nativity
 
 
-  gather()
-# plots: 1 (0-5m), 11 (0-1m), 2 (5-10m), 21 (5-6m)
+-- ParkSpeciesSQL()
+SELECT tlu_Project_Taxa.Species_Code, tlu_Project_Taxa.Scientific_name, tlu_Project_Taxa.Layer,
+  tlu_Layer.Layer_desc AS FxnGroup, tlu_Project_Taxa.Native, tlu_Nativity.Nativity_desc AS Nativity,
+  tlu_Project_Taxa.Perennial, tlu_AnnualPerennial.AnnualPerennial_desc AS AnnPer 
+FROM 
+  tlu_AnnualPerennial INNER JOIN (
+    tlu_Nativity INNER JOIN (
+      tlu_Project_Taxa INNER JOIN 
+        tlu_Layer ON 
+        tlu_Project_Taxa.Layer = tlu_Layer.Layer_code) ON 
+      tlu_Nativity.Nativity_code = tlu_Project_Taxa.Native) ON
+    tlu_AnnualPerennial.AnnualPerennial_code = tlu_Project_Taxa.Perennial 
+WHERE ((tlu_Project_Taxa.Species_code Is Not Null) AND (tlu_Project_Taxa.Unit_code=ParkName(iPark)))
+```
 
+```vba
+Function Export_AnnualReport_AbsoluteCover(xPark As Integer, xYear As Integer)
+
+Dim strWhere As String
+
+Dim strRaw As String
+Dim strRawSum As String
+
+Dim str1 As String
+Dim str2 As String
+Dim str0Data As String
+
+Dim strData As String
+
+Dim strAbsCovData As String
+Dim strAbsCov As String 'final SQL string
+
+' Create WHERE string --------------------------------------------------------
+strWhere = LocTypeFilter(xPark) & " AND ((Year([Start_Date]))=" & xYear & ") AND ((tlu_Condition.Analysis_code) Is Null Or (tlu_Condition.Analysis_code)=" & Chr$(34) & "Alive" & Chr$(34) & ")"
+' ----------------------------------------------------------------------------
+
+' Create data strings --------------------------------------------------------
+strRaw = "SELECT Year([Start_Date]) AS SurveyYear, tbl_Sites.Unit_Code AS Park, tbl_Sites.Site_Name AS IslandCode, tbl_Locations.Location_Code AS SiteCode, tbl_Locations.Vegetation_Community, " & _
+    "tbl_Species_Data.Species_Code, tlu_Condition.Analysis_code AS Condition, Park_Spp.FxnGroup, Park_Spp.Nativity " & _
+    "FROM ((tbl_Sites INNER JOIN (tbl_Locations INNER JOIN (tbl_Events INNER JOIN (tbl_Event_Point LEFT JOIN tbl_Species_Data ON tbl_Event_Point.Event_Point_ID = tbl_Species_Data.Event_Point_ID) " & _
+    "ON tbl_Events.Event_ID = tbl_Event_Point.Event_ID) ON tbl_Locations.Location_ID = tbl_Events.Location_ID) ON tbl_Sites.Site_ID = tbl_Locations.Site_ID) LEFT JOIN tlu_Condition " & _
+    "ON tbl_Species_Data.Condition = tlu_Condition.Condition) LEFT JOIN (" & ParkSpeciesSQL(xPark) & ") AS Park_Spp ON Park_Spp.Species_code = tbl_Species_Data.Species_Code " & _
+    "WHERE (" & strWhere & ")"
+    
+strRawSum = "SELECT qRaw.SurveyYear, qRaw.Park, qRaw.IslandCode, qRaw.SiteCode, qRaw.Vegetation_Community, qRaw.FxnGroup, qRaw.Nativity, Count(qRaw.Species_Code) AS N " & _
+    "FROM (" & strRaw & ") AS qRaw GROUP BY qRaw.SurveyYear, qRaw.Park, qRaw.IslandCode, qRaw.SiteCode, qRaw.Vegetation_Community, qRaw.FxnGroup, qRaw.Nativity"
+'-----
+str1 = "SELECT Year([Start_Date]) AS SurveyYear, tbl_Sites.Unit_Code AS Park, tbl_Sites.Site_Name AS IslandCode, tbl_Locations.Location_Code AS SiteCode, tbl_Locations.Vegetation_Community " & _
+    "FROM tbl_Sites INNER JOIN (tbl_Locations INNER JOIN tbl_Events ON tbl_Locations.Location_ID = tbl_Events.Location_ID) ON tbl_Sites.Site_ID = tbl_Locations.Site_ID " & _
+    "WHERE (" & LocTypeFilter(xPark) & " AND ((Year([Start_Date]))=" & xYear & "))"
+    
+str2 = "SELECT DISTINCT Park_Spp.FxnGroup, Park_Spp.Nativity " & _
+    "FROM ((tbl_Sites INNER JOIN (tbl_Locations INNER JOIN (tbl_Events INNER JOIN (tbl_Event_Point LEFT JOIN tbl_Species_Data ON tbl_Event_Point.Event_Point_ID = tbl_Species_Data.Event_Point_ID) " & _
+    "ON tbl_Events.Event_ID = tbl_Event_Point.Event_ID) ON tbl_Locations.Location_ID = tbl_Events.Location_ID) ON tbl_Sites.Site_ID = tbl_Locations.Site_ID ) LEFT JOIN tlu_Condition " & _
+    "ON tbl_Species_Data.Condition = tlu_Condition.Condition) LEFT JOIN (" & ParkSpeciesSQL(xPark) & ") AS Park_Spp ON Park_Spp.Species_code = tbl_Species_Data.Species_Code " & _
+    "WHERE (" & strWhere & ")"
+
+str0Data = "SELECT qry1.SurveyYear, qry1.Park, qry1.IslandCode, qry1.SiteCode, qry1.Vegetation_Community, qry2.FxnGroup, qry2.Nativity, 0 AS N " & _
+    "FROM (" & str1 & ")  AS qry1, (" & str2 & ")  AS qry2"
+'-----
+'strData = strRawSum + str0Data
+strData = "SELECT qryUnion.SurveyYear, qryUnion.Park, qryUnion.IslandCode, qryUnion.SiteCode, qryUnion.Vegetation_Community, qryUnion.FxnGroup, qryUnion.Nativity, Sum(qryUnion.N) AS SumOfN " & _
+    "FROM (SELECT * FROM (" & str0Data & ") AS q0Data UNION SELECT * FROM (" & strRawSum & ") AS qryRawSum)  AS qryUnion " & _
+    "GROUP BY qryUnion.SurveyYear, qryUnion.Park, qryUnion.IslandCode, qryUnion.SiteCode, qryUnion.Vegetation_Community, qryUnion.FxnGroup, qryUnion.Nativity"
+'-----------------------------------------------------------------------------
+
+' Calculating Absolute Cover (Figure E2) -------------------------------------
+strAbsCovData = "SELECT qData.SurveyYear, qData.Park, qData.IslandCode, qData.SiteCode, qData.Vegetation_Community, qData.FxnGroup, qData.Nativity, qData.SumOfN, qTotalPoints.NofPoints, " & _
+    "([SumOfN]/[NofPoints])*100 AS AbsCover " & _
+    "FROM (" & strData & ") AS qData INNER JOIN (" & TotalPointsSQL(xPark) & ") AS qTotalPoints ON (qData.SurveyYear = qTotalPoints.SurveyYear) AND (qData.Park = qTotalPoints.Park) " & _
+    "AND (qData.IslandCode = qTotalPoints.IslandCode) AND (qData.SiteCode = qTotalPoints.SiteCode)"
+
+strAbsCov = "SELECT qry.SurveyYear, " & ParkSelect(xPark) & ", qry.Vegetation_Community, Count(qry.SiteCode) AS NofTransects, qry.FxnGroup, qry.Nativity, " & _
+    "Avg(qry.AbsCover) AS Average, StDev(qry.AbsCover) AS StdDev, Min(qry.AbsCover) AS MinRange, Max(qry.AbsCover) AS MaxRange, " & _
+    Chr$(34) & "Annual Report, Absolute Cover (Fig. E2)" & Chr$(34) & " AS Query_type " & _
+    "FROM (" & strAbsCovData & ") AS qry " & _
+    "GROUP BY qry.SurveyYear, " & ParkSelect(xPark) & ", qry.Vegetation_Community, qry.FxnGroup, qry.Nativity"
+
+Export_AnnualReport_AbsoluteCover = strAbsCov
+
+End Function
+
+
+Function TotalPointsSQL(iPark As Integer)
+'SQL statement for total points
+
+TotalPointsSQL = "SELECT DISTINCT tbl_Sites.Unit_Code AS Park, tbl_Sites.Site_Name AS IslandCode, tbl_Locations.Location_ID, tbl_Locations.Location_Code AS SiteCode, tbl_Locations.Vegetation_Community, " & _
+    "Year(tbl_Events.Start_Date) AS SurveyYear, tbl_Events.Start_Date AS SurveyDate, Count(tbl_Event_Point.Point_No) AS NofPoints " & _
+    "FROM tbl_Sites INNER JOIN (tbl_Locations INNER JOIN (tbl_Events INNER JOIN tbl_Event_Point ON tbl_Events.Event_ID = tbl_Event_Point.Event_ID) " & _
+    "ON tbl_Locations.Location_ID = tbl_Events.Location_ID) ON tbl_Sites.Site_ID = tbl_Locations.Site_ID " & _
+    "WHERE (" & LocTypeFilter(iPark) & ") " & _
+    "GROUP BY tbl_Sites.Unit_Code, tbl_Sites.Site_Name, tbl_Locations.Location_ID, tbl_Locations.Location_Code, tbl_Locations.Vegetation_Community, tbl_Events.Start_Date, Year(tbl_Events.Start_Date)"
+    '"HAVING (((tbl_Sites.Unit_Code) = " & Chr$(34) & ParkName(iPark) & Chr$(34) & "))"
+End Function
 ```
 
 TODO: on exit for accessdb, export csv files based on date modified

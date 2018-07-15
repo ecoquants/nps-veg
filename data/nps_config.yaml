@@ -1,3 +1,6 @@
-dir_tables_csv:
-  default: ~/Google Drive/projects/nps-ecoquants/data/tables_csv
-  Ben-Bests-Macbook-Pro.local: ~/Google Drive/projects/nps-ecoquants/data/tables_csv
+dir_Access_tables_csv:
+  default: ~/Google Drive/projects/nps-ecoquants/data/Access_dbs
+  Ben-Bests-MBP: ~/Google Drive/projects/nps-ecoquants/data/Access_tables_csv
+dir_R_tables_csv:
+  default: ~/Google Drive/projects/nps-ecoquants/data/R_tables_csv
+  Ben-Bests-MBP: ~/Google Drive/projects/nps-ecoquants/data/R_tables_csv
